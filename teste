@@ -1,0 +1,47 @@
+import boto3
+import time
+
+# Defina as informações da instância EC2 que você deseja verificar
+instance_id = 'i-0123456789abcdefg'
+region_name = 'us-west-2'
+
+# Crie um cliente SSM
+ssm = boto3.client('ssm', region_name=region_name)
+
+# Aguarde até que a instância esteja pronta para receber comandos via SSM
+while True:
+    try:
+        response = ssm.describe_instance_information(InstanceInformationFilterList=[{'key': 'InstanceIds', 'valueSet': [instance_id]}])
+        if response['InstanceInformationList'][0]['PingStatus'] == 'Online':
+            break
+    except:
+        pass
+    time.sleep(5)
+
+# Crie um cliente EC2
+ec2 = boto3.client('ec2', region_name=region_name)
+
+# Execute um comando SSM para verificar a configuração do serviço chrony na instância
+response = ssm.send_command(
+    InstanceIds=[instance_id],
+    DocumentName='AWS-RunShellScript',
+    Parameters={'commands': ['systemctl status chronyd']},
+)
+
+# Aguarde até que o comando SSM seja concluído
+command_id = response['Command']['CommandId']
+while True:
+    response = ssm.list_command_invocations(CommandId=command_id, InstanceId=instance_id)
+    status = response['CommandInvocations'][0]['Status']
+    if status in ['Success', 'Failed', 'Canceled']:
+        break
+    time.sleep(5)
+
+# Obtenha o resultado do comando SSM
+output = response['CommandInvocations'][0]['CommandPlugins'][0]['Output']
+
+# Verifique se o serviço chrony está configurado e sincronizado
+if 'Active: active (running)' in output and 'stratum=' in output:
+    print('O serviço chrony está configurado e sincronizado.')
+else:
+    print('O serviço chrony não está configurado ou sincronizado.')
